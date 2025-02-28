@@ -125,7 +125,7 @@ def seas_adj_indx_cstm_cv(df, method='mean', cv=True, yrs_indx=None):
 
     return df_sa
 
-    def main():
+def main():
 
       # df= your df
 
