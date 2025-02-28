@@ -1,0 +1,149 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_style("darkgrid")
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+
+def bld_seas_indx_cstm_cv(df, column_name, method='mean', cv=True, yrs_indx=None):
+    df = df.copy()
+
+    # Create a date-based index with month-day format
+    df['month_day'] = df.index.strftime('%m-%d')
+    df['year'] = df.index.year
+
+    # Ensure the column is numeric
+    df[column_name] = pd.to_numeric(df[column_name], errors='coerce')
+
+    # Create the pivot table
+    seasonal_df = df.pivot_table(values=column_name, index='month_day', columns='year', aggfunc='first')
+    seasonal_df = seasonal_df.sort_index()
+    seasonal_df = seasonal_df.fillna(method='ffill')
+
+    all_dates = []
+    for month in range(1, 13):
+        # Handle different days per month
+        if month in [4, 6, 9, 11]:
+            days = 30
+        elif month == 2:
+            days = 29  # Include Feb 29 for leap years
+        else:
+            days = 31
+        for day in range(1, days + 1):
+            all_dates.append(f"{month:02d}-{day:02d}")
+
+    complete_index = pd.Index(all_dates)
+    seasonal_df = seasonal_df.reindex(complete_index)
+
+    for year in seasonal_df.columns:
+        if pd.isna(seasonal_df.loc['02-29', year]):
+            seasonal_df.loc['02-29', year] = seasonal_df.loc['02-28', year]
+
+    # Forward fill any other missing values
+    seasonal_df = seasonal_df.fillna(method='ffill')
+
+    # Now all years should have 366 days including Feb 29
+    all_years = seasonal_df.columns
+
+    # Calculate the seasonal index based on the method
+    if cv:
+        cv_indices = {}
+        for year in all_years:
+            other_years = [y for y in all_years if y != year]
+            if other_years:
+                if method == 'median':
+                    year_index = seasonal_df[other_years].median(axis=1)
+                elif method == 'mean':
+                    year_index = seasonal_df[other_years].mean(axis=1)
+                elif method == 'olympic':
+                    year_index = seasonal_df[other_years].apply(lambda x: x.sort_values()[1:-1].mean(), axis=1)
+                else:
+                    raise ValueError("Method must be 'median', 'mean', or 'olympic'")
+                cv_indices[year] = year_index
+        seasonal_index = pd.DataFrame(cv_indices)
+    else:
+        if method == 'median':
+            seasonal_index = seasonal_df.median(axis=1)
+        elif method == 'mean':
+            seasonal_index = seasonal_df.mean(axis=1)
+        elif method == 'olympic':
+            seasonal_index = seasonal_df.apply(lambda x: x.sort_values()[1:-1].mean(), axis=1)
+        else:
+            raise ValueError("Method must be 'median', 'mean', or 'olympic'")
+
+        # For non-CV case, we create a DataFrame with the same seasonal index for all years
+        seasonal_index = pd.DataFrame({year: seasonal_index for year in all_years})
+
+    # Normalize the index if specified
+    if yrs_indx:
+        yearly_means = seasonal_index.mean()
+        if yrs_indx == 'abs':
+            seasonal_index = seasonal_index.sub(yearly_means, axis=1)
+        elif yrs_indx == 'pct':
+            seasonal_index = seasonal_index.div(yearly_means, axis=1) - 1
+        else:
+            raise ValueError("yrs_indx must be 'abs' or 'pct'")
+
+    # Sort the index to ensure proper ordering
+    seasonal_index = seasonal_index.sort_index()
+
+    return seasonal_index
+def seas_adj_indx_cstm_cv(df, method='mean', cv=True, yrs_indx=None):
+    df_sa = pd.DataFrame(index=df.index)
+    for col in df.columns:
+        seasonal_index = bld_seas_indx_cstm_cv(df, col, method, cv, yrs_indx)
+        df['month_day'] = df.index.strftime('%m-%d')
+
+        if cv and isinstance(seasonal_index, pd.DataFrame):
+            # For CV case, we need to select the appropriate year's index for each row
+            if yrs_indx == 'pct':
+                df_sa[f"{col}_sa"] = df.apply(
+                    lambda row: row[col] / (1 + seasonal_index.loc[row['month_day'], row.name.year]), axis=1)
+            else:  # 'abs' or None
+                df_sa[f"{col}_sa"] = df.apply(
+                    lambda row: row[col] - seasonal_index.loc[row['month_day'], row.name.year], axis=1)
+        else:
+            # If not using CV or if seasonal_index is not a DataFrame
+            # We need to handle the DataFrame differently for the non-CV case
+            if not cv and isinstance(seasonal_index, pd.DataFrame):
+                # For non-CV case, we can just use the first column of the DataFrame
+                # since all columns should have the same values
+                first_year = seasonal_index.columns[0]
+                seasonal_series = seasonal_index[first_year]
+
+                if yrs_indx == 'pct':
+                    df_sa[f"{col}_sa"] = df[col] / (1 + df['month_day'].map(seasonal_series))
+                else:  # 'abs' or None
+                    df_sa[f"{col}_sa"] = df[col] - df['month_day'].map(seasonal_series)
+            else:
+                # If seasonal_index is already a Series (not a DataFrame)
+                if yrs_indx == 'pct':
+                    df_sa[f"{col}_sa"] = df[col] / (1 + df['month_day'].map(seasonal_index))
+                else:  # 'abs' or None
+                    df_sa[f"{col}_sa"] = df[col] - df['month_day'].map(seasonal_index)
+
+    return df_sa
+
+    def main():
+
+      # df= your df
+
+      _yrs_index = next(index for index in [
+      'abs',  # note if non stationary data, but has negatives
+      # 'pct',  # note: if non stationary data, but has no negatives
+      # None  # note: None is the default, no adjustment. if ur data has negatives or is very stationary
+      ] if isinstance(index, str) or index is None)
+      
+      _method = next(method for method in [
+      'mean',
+      # 'median', #haven't had much luck on smaller datasets
+      # 'olympic'  # throws out high and low. good to check to see how much things change... but cuts data size a lot
+      ] if method)
+      
+      df_sa = seas_adj_indx_cstm_cv(df, method=_method, cv=True, yrs_indx=_yrs_index)
+
+if __name__ == "__main__":
+    main()
+
+    
