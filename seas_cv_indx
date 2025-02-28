@@ -89,41 +89,43 @@ def bld_seas_indx_cstm_cv(df, column_name, method='mean', cv=True, yrs_indx=None
     seasonal_index = seasonal_index.sort_index()
 
     return seasonal_index
+
+
 def seas_adj_indx_cstm_cv(df, method='mean', cv=True, yrs_indx=None):
-    df_sa = pd.DataFrame(index=df.index)
-    for col in df.columns:
-        seasonal_index = bld_seas_indx_cstm_cv(df, col, method, cv, yrs_indx)
-        df['month_day'] = df.index.strftime('%m-%d')
+df_sa = pd.DataFrame(index=df.index)
+for col in df.columns:
+    seasonal_index = bld_seas_indx_cstm_cv(df, col, method, cv, yrs_indx)
+    df['month_day'] = df.index.strftime('%m-%d')
 
-        if cv and isinstance(seasonal_index, pd.DataFrame):
-            # For CV case, we need to select the appropriate year's index for each row
+    if cv and isinstance(seasonal_index, pd.DataFrame):
+        # For CV case, we need to select the appropriate year's index for each row
+        if yrs_indx == 'pct':
+            df_sa[f"{col}_sa"] = df.apply(
+                lambda row: row[col] / (1 + seasonal_index.loc[row['month_day'], row.name.year]), axis=1)
+        else:  # 'abs' or None
+            df_sa[f"{col}_sa"] = df.apply(
+                lambda row: row[col] - seasonal_index.loc[row['month_day'], row.name.year], axis=1)
+    else:
+        # If not using CV or if seasonal_index is not a DataFrame
+        # We need to handle the DataFrame differently for the non-CV case
+        if not cv and isinstance(seasonal_index, pd.DataFrame):
+            # For non-CV case, we can just use the first column of the DataFrame
+            # since all columns should have the same values
+            first_year = seasonal_index.columns[0]
+            seasonal_series = seasonal_index[first_year]
+
             if yrs_indx == 'pct':
-                df_sa[f"{col}_sa"] = df.apply(
-                    lambda row: row[col] / (1 + seasonal_index.loc[row['month_day'], row.name.year]), axis=1)
+                df_sa[f"{col}_sa"] = df[col] / (1 + df['month_day'].map(seasonal_series))
             else:  # 'abs' or None
-                df_sa[f"{col}_sa"] = df.apply(
-                    lambda row: row[col] - seasonal_index.loc[row['month_day'], row.name.year], axis=1)
+                df_sa[f"{col}_sa"] = df[col] - df['month_day'].map(seasonal_series)
         else:
-            # If not using CV or if seasonal_index is not a DataFrame
-            # We need to handle the DataFrame differently for the non-CV case
-            if not cv and isinstance(seasonal_index, pd.DataFrame):
-                # For non-CV case, we can just use the first column of the DataFrame
-                # since all columns should have the same values
-                first_year = seasonal_index.columns[0]
-                seasonal_series = seasonal_index[first_year]
+            # If seasonal_index is already a Series (not a DataFrame)
+            if yrs_indx == 'pct':
+                df_sa[f"{col}_sa"] = df[col] / (1 + df['month_day'].map(seasonal_index))
+            else:  # 'abs' or None
+                df_sa[f"{col}_sa"] = df[col] - df['month_day'].map(seasonal_index)
 
-                if yrs_indx == 'pct':
-                    df_sa[f"{col}_sa"] = df[col] / (1 + df['month_day'].map(seasonal_series))
-                else:  # 'abs' or None
-                    df_sa[f"{col}_sa"] = df[col] - df['month_day'].map(seasonal_series)
-            else:
-                # If seasonal_index is already a Series (not a DataFrame)
-                if yrs_indx == 'pct':
-                    df_sa[f"{col}_sa"] = df[col] / (1 + df['month_day'].map(seasonal_index))
-                else:  # 'abs' or None
-                    df_sa[f"{col}_sa"] = df[col] - df['month_day'].map(seasonal_index)
-
-    return df_sa
+return df_sa
 
 def main():
 
