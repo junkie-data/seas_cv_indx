@@ -10,7 +10,7 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
 
 
-def bld_seas_indx_cstm_cv(df, column_name, method='mean', cv=True, yrs_indx=None):
+def bld_seas_indx_cstm_cv(df, column_name, method='mean', cv=True, type_idx=None):
     df = df.copy()
 
     # Create a date-based index with month-day format
@@ -80,14 +80,14 @@ def bld_seas_indx_cstm_cv(df, column_name, method='mean', cv=True, yrs_indx=None
         seasonal_index = pd.DataFrame({year: seasonal_index for year in all_years})
 
     # Normalize the index if specified
-    if yrs_indx:
+    if type_idx:
         yearly_means = seasonal_index.mean()
-        if yrs_indx == 'abs':
+        if type_idx == 'abs':
             seasonal_index = seasonal_index.sub(yearly_means, axis=1)
-        elif yrs_indx == 'pct':
+        elif type_idx == 'pct':
             seasonal_index = seasonal_index.div(yearly_means, axis=1) - 1
         else:
-            raise ValueError("yrs_indx must be 'abs' or 'pct'")
+            raise ValueError("type_idx must be 'abs' or 'pct'")
 
     # Sort the index to ensure proper ordering
     seasonal_index = seasonal_index.sort_index()
@@ -95,15 +95,15 @@ def bld_seas_indx_cstm_cv(df, column_name, method='mean', cv=True, yrs_indx=None
     return seasonal_index
 
 
-def seas_adj_indx_cstm_cv(df, method='mean', cv=True, yrs_indx=None):
+def seas_adj_indx_cstm_cv(df, method='mean', cv=True, type_idx=None):
     df_sa = pd.DataFrame(index=df.index)
     for col in df.columns:
-        seasonal_index = bld_seas_indx_cstm_cv(df, col, method, cv, yrs_indx)
+        seasonal_index = bld_seas_indx_cstm_cv(df, col, method, cv, type_idx)
         df['month_day'] = df.index.strftime('%m-%d')
 
         if cv and isinstance(seasonal_index, pd.DataFrame):
             # For CV case, we need to select the appropriate year's index for each row
-            if yrs_indx == 'pct':
+            if type_idx == 'pct':
                 df_sa[f"{col}_sa"] = df.apply(
                     lambda row: row[col] / (1 + seasonal_index.loc[row['month_day'], row.name.year]), axis=1)
             else:  # 'abs' or None
@@ -118,13 +118,13 @@ def seas_adj_indx_cstm_cv(df, method='mean', cv=True, yrs_indx=None):
                 first_year = seasonal_index.columns[0]
                 seasonal_series = seasonal_index[first_year]
 
-                if yrs_indx == 'pct':
+                if type_idx == 'pct':
                     df_sa[f"{col}_sa"] = df[col] / (1 + df['month_day'].map(seasonal_series))
                 else:  # 'abs' or None
                     df_sa[f"{col}_sa"] = df[col] - df['month_day'].map(seasonal_series)
             else:
                 # If seasonal_index is already a Series (not a DataFrame)
-                if yrs_indx == 'pct':
+                if type_idx == 'pct':
                     df_sa[f"{col}_sa"] = df[col] / (1 + df['month_day'].map(seasonal_index))
                 else:  # 'abs' or None
                     df_sa[f"{col}_sa"] = df[col] - df['month_day'].map(seasonal_index)
@@ -135,7 +135,7 @@ def seas_adj_indx_cstm_cv(df, method='mean', cv=True, yrs_indx=None):
 def main():
     # df = your df
 
-    _yrs_index = next(index for index in [
+    _idx_type = next(index for index in [
         'abs',  # note if non stationary data, but has negatives
         # 'pct',  # note: if non stationary data, but has no negatives
         # None  # note: None is the default, no adjustment. if ur data has negatives or is very stationary
@@ -147,7 +147,7 @@ def main():
         # 'olympic'  # throws out high and low. good to check to see how much things change... but cuts data size a lot
     ] if method)
     
-    df_sa = seas_adj_indx_cstm_cv(df, method=_method, cv=True, yrs_indx=_yrs_index)
+    df_sa = seas_adj_indx_cstm_cv(df, method=_method, cv=True, type_idx=_idx_type)
 
 
 if __name__ == "__main__":
